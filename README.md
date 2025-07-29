@@ -29,13 +29,13 @@ This project is aimed at developers, cybersecurity students, and ethical hackers
 ## **Installation**
 1. Clone this repository:
    ```bash
-   git clone https://github.com/your-username/web-vulnerability-scanner.git
-   cd web-vulnerability-scanner
+   git clone https://github.com/yEshaaSumesh/Project-Elevate-Labs.git
+   cd Project-Elevate-Labs
    
 2.Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
-3.Ensure Python 3.x is installed.
+3.Ensure Python 3.x is installed and git is installed in your system.
 
