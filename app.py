@@ -62,16 +62,6 @@ dark_css = """
 </style>
 """
 
-st.markdown(dark_css, unsafe_allow_html=True)
-
-# Page config
-st.set_page_config(
-    page_title="Cyber Web Vulnerability Scanner",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-st.title("Cyber Web Vulnerability Scanner")
 
 target_url = st.text_input(
     "Enter Target URL", 
