@@ -1,3 +1,4 @@
+from urllib.parse import urlparse
 import streamlit as st
 from scanner_core import WebVulnerabilityScanner
 import time
@@ -9,7 +10,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Updated Custom CSS for Blue/Cyan Cyber-Tech Look ---
+# --- Updated Custom CSS for Blue/Cyan Cyber-Tech Look (less glow, visible labels) ---
 st.markdown("""
 <style>
     /* Overall Background and Text */
@@ -23,15 +24,23 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Orbitron', sans-serif; /* Futuristic Header Font */
         color: #66FFFF; /* Lighter Cyan for main titles */
-        text-shadow: 0 0 8px #66FFFF, 0 0 15px #66FFFF; /* Stronger neon glow */
     }
     h1 {
         color: #FF66FF; /* Neon Magenta for the main app title */
         text-align: center;
         font-size: 3.5em; /* Slightly larger */
         padding-bottom: 0.7em;
+        /* Removed text-shadow for clean/minimalistic look */
     }
 
+    /* General Labels for Inputs/Sliders */
+    .stTextInput label, .stSlider label {
+        color: #FFFFFF !important; /* Make labels explicitly white */
+        font-family: 'Fira Code', monospace;
+        font-size: 1.1em;
+        font-weight: bold;
+    }
+    
     /* Buttons */
     .stButton>button {
         background-color: #0077B6; /* Deep Blue */
@@ -196,7 +205,7 @@ st.markdown("""
         font-family: 'Orbitron', sans-serif;
         text-align: center;
         padding-bottom: 1.5em;
-        text-shadow: 0 0 10px #FF66FF;
+        /* Removed text-shadow here too for consistency if applied */
     }
     /* Streamlit internal text, e.g., for sliders */
     div.st-emotion-cache-1jmvejs p {
@@ -250,7 +259,7 @@ status_text = st.empty()
 
 # Function to display findings
 def display_findings(findings, title):
-    st.subheader(f"{title} ({len(findings)})")
+    st.subheader(f"🌐 {title} ({len(findings)})")
     if findings:
         for i, finding in enumerate(findings):
             severity = finding.get("severity", "Info")
@@ -267,7 +276,7 @@ def display_findings(findings, title):
             with color_func(f"**[{severity.upper()}]** {finding['type']}").expander(f"Details for Finding #{i+1}"):
                 st.markdown(f"**URL:** `{finding['url']}`")
                 if finding['payload'] and finding['payload'] != "N/A":
-                    st.markdown(f"**Payload:** `{finding['payload']}`")
+                    st.markdown(f"**Payload:** \n```\n{finding['payload']}\n```") # Use code block for payload
                 st.markdown(f"**Evidence:** \n```\n{finding['evidence']}\n```")
                 st.markdown("---")
     else:
@@ -305,17 +314,22 @@ if st.button("INITIATE SCAN"):
         scanner.crawl()
 
 
-        update_progress_and_status(50, "Testing for SQL Injection (GET)...",
-                                log_msg="Initiating GET parameter SQL Injection tests.")
-        # Ensure we test all visited URLs for GET-based SQLi/XSS
-        for url_to_test in scanner.visited_urls:
-             scanner.test_sql_injection(url_to_test)
+        update_progress_and_status(50, "Testing for SQL Injection on all visited URLs...",
+                                log_msg="Initiating SQL Injection tests on GET parameters.")
+        # Pass a copy of visited_urls to avoid RuntimeError if set changes during iteration
+        for url_to_test in list(scanner.visited_urls):
+            parsed = urlparse(url_to_test)
+            # Only test URLs with query parameters for GET-based SQLi
+            if parsed.query:
+                scanner.test_sql_injection(url_to_test)
 
 
-        update_progress_and_status(70, "Testing for Cross-Site Scripting (GET)...",
-                                log_msg="Initiating GET parameter XSS tests.")
-        for url_to_test in scanner.visited_urls:
-            scanner.test_xss(url_to_test)
+        update_progress_and_status(70, "Testing for Cross-Site Scripting on all visited URLs...",
+                                log_msg="Initiating XSS tests on GET parameters.")
+        for url_to_test in list(scanner.visited_urls):
+            parsed = urlparse(url_to_test)
+            if parsed.query:
+                scanner.test_xss(url_to_test)
 
 
         update_progress_and_status(80, "Testing forms for vulnerabilities...",
@@ -326,9 +340,9 @@ if st.button("INITIATE SCAN"):
                                 log_msg="Scanning for common sensitive files and directory exposure.")
         scanner.check_sensitive_files()
 
-        # update_progress_and_status(95, "Performing basic IDOR checks...",
-        #                         log_msg="Conducting basic Insecure Direct Object Reference checks.")
-        # scanner.test_idor_basic() # Uncomment if IDOR is matured for basic heuristic checks
+        update_progress_and_status(95, "Performing basic IDOR checks...",
+                                log_msg="Conducting basic Insecure Direct Object Reference checks.")
+        scanner.test_idor_basic() # This will now run
 
         final_results = scanner.results
         # Combine the logs collected by update_progress_and_status with logs from scanner_core
@@ -339,7 +353,7 @@ if st.button("INITIATE SCAN"):
         status_text.empty() # Clear final status message
 
         st.markdown("## Scan Summary")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6) # Added column for IDOR
         with col1:
             st.metric(label="SQLi Findings", value=len(final_results['sqli']))
         with col2:
@@ -350,14 +364,16 @@ if st.button("INITIATE SCAN"):
             st.metric(label="CSRF Findings", value=len(final_results['csrf']))
         with col5:
             st.metric(label="Sensitive Files", value=len(final_results['sensitive_files']))
+        with col6:
+            st.metric(label="IDOR Findings", value=len(final_results['idor']))
 
 
         st.markdown("---") # Visual separator
 
         # --- Display Results in Tabs ---
         tab_titles = ["Security Headers", "SQL Injection", "XSS", "Form Vulnerabilities",
-                      "CSRF", "Sensitive Files/Directory Listing", "Full Scan Logs"]
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(tab_titles)
+                      "CSRF", "Sensitive Files/Directory Listing", "IDOR", "Full Scan Logs"] # Added IDOR tab
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(tab_titles) # Adjusted tab count
 
         with tab1:
             display_findings(final_results["headers"], "Security Header Issues")
@@ -377,9 +393,12 @@ if st.button("INITIATE SCAN"):
         with tab6:
             display_findings(final_results["sensitive_files"], "Sensitive Files & Directory Listings")
 
-        with tab7:
+        with tab7: # This is the new IDOR tab
+            display_findings(final_results["idor"], "Insecure Direct Object Reference (IDOR)")
+
+        with tab8: # This is the new Full Scan Logs tab
             # Display combined logs in a dedicated text_area at the end
-            st.subheader(" Full Scan Logs")
+            st.subheader("📡 Full Scan Logs")
             st.text_area("All Scan Activity", value="\n".join(final_logs), height=500, max_chars=None, key="final_scan_logs_display")
 
         # --- Download Report Button ---
@@ -394,7 +413,8 @@ if st.button("INITIATE SCAN"):
                 "form_vulnerabilities": len(final_results['forms']),
                 "csrf_findings": len(final_results['csrf']),
                 "sensitive_files_findings": len(final_results['sensitive_files']),
-                "header_issues": len(final_results['headers'])
+                "header_issues": len(final_results['headers']),
+                "idor_findings": len(final_results['idor']) # Added to summary
             },
             "findings": final_results,
             "logs": final_logs
