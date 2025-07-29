@@ -95,7 +95,7 @@ st.markdown("""
         gap: 20px;
         justify-content: center;
         background-color: #161B22; /* Darker tab background */
-        border-radius: 8px;
+        border-radius: 8gpx;
         padding: 10px;
         box-shadow: 0 0 10px #00FFFF;
     }
@@ -231,7 +231,9 @@ max_depth = st.slider(
 )
 
 # Placeholders for dynamic content
-log_placeholder = st.empty()
+# log_placeholder is defined HERE once, outside the button click
+log_area_container = st.empty() # This will hold the text_area
+
 progress_bar = st.progress(0)
 status_text = st.empty()
 
@@ -264,7 +266,7 @@ def display_findings(findings, title):
 if st.button("INITIATE SCAN"):
 
     if not target_url.strip():
-        st.error(" **ERROR:** Please enter a valid URL to initiate the scan.")
+        st.error("🚨 **ERROR:** Please enter a valid URL to initiate the scan.")
     else:
         # Initialize the scanner with the selected depth
         scanner = WebVulnerabilityScanner(target_url, depth=max_depth)
@@ -273,17 +275,25 @@ if st.button("INITIATE SCAN"):
         if 'scan_logs' not in st.session_state:
             st.session_state.scan_logs = []
 
+        # Define the update function
         def update_log_and_progress(pct, msg, log_msg=None, log_level="INFO"):
             progress_bar.progress(pct)
             status_text.text(f"Status: {msg}")
             if log_msg:
                 st.session_state.scan_logs.append(f"[{log_level}] {log_msg}")
-                # Use a placeholder to update the text_area without re-running the whole app
-                log_placeholder.text_area("Scan Logs", value="\n".join(st.session_state.scan_logs), height=350, max_chars=None, key="scan_logs_display")
-            time.sleep(0.1) # Small delay for UI update visibility
+                # Update the content of the pre-existing text_area using its container
+                with log_area_container: # Use the placeholder defined globally
+                    st.text_area("Scan Logs", value="\n".join(st.session_state.scan_logs), height=350, max_chars=None, key="scan_logs_display_unique")
+                # The key is now unique here, but more importantly, the text_area itself is only drawn once.
+                # When using a placeholder to update, Streamlit doesn't recreate the element, it just updates its content.
+            time.sleep(0.05) # Small delay for UI update visibility
 
-        st.session_state.scan_logs = [] # Clear logs for new scan
-        log_placeholder = st.empty() # Re-initialize placeholder
+        st.session_state.scan_logs = [] # Clear logs for new scan at the start of a scan
+        # The log_area_container is already defined, no need to re-initialize it here.
+        # Ensure the text_area is drawn once initially
+        with log_area_container:
+            st.text_area("Scan Logs", value="", height=350, max_chars=None, key="scan_logs_display_initial")
+
 
         update_log_and_progress(0, "Preparing scanner...", log_msg="Scan initiated.", log_level="INFO")
 
@@ -374,7 +384,9 @@ if st.button("INITIATE SCAN"):
         with tab7:
             # Display combined logs
             st.subheader("📡 Full Scan Logs")
-            st.text_area("All Scan Activity", value="\n".join(final_logs), height=500, max_chars=None)
+            # This text_area is outside the loop, so it will only be drawn once.
+            # Its content will be the full combined logs after the scan is complete.
+            st.text_area("All Scan Activity", value="\n".join(final_logs), height=500, max_chars=None, key="final_scan_logs_display")
 
         # --- Download Report Button ---
         # Generate a more structured report text, possibly JSON for later parsing
