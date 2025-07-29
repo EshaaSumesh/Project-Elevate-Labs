@@ -57,11 +57,15 @@ class WebVulnerabilityScanner:
     # --------------------------
     # Add a finding to results
     def add_finding(self, vuln_type, url, payload, evidence, severity):
+        # Fix for f-string backslash error: perform replace outside the f-string expression
+        # Or, even better, encode to escape newlines
+        sanitized_evidence = evidence[:200].replace('\n', '\\n').replace('\r', '\\r') # Shorten and escape newlines
+        
         finding = {
             "type": vuln_type,
             "url": url,
             "payload": payload,
-            "evidence": evidence,
+            "evidence": evidence, # Keep full evidence for the report
             "severity": severity
         }
         # Categorize findings correctly based on type
@@ -78,7 +82,7 @@ class WebVulnerabilityScanner:
         elif "Header" in vuln_type:
             self.results["headers"].append(finding)
         # Note: 'forms' category will be populated directly from test_forms, not add_finding
-        self.log(f"[FINDING] {severity} - {vuln_type} at {url} with payload '{payload}' - Evidence: {evidence[:100].replace('\n', ' ')}...", "SUCCESS" if severity in ["High", "Medium"] else "INFO")
+        self.log(f"[FINDING] {severity} - {vuln_type} at {url} with payload '{payload}' - Evidence: {sanitized_evidence}...", "SUCCESS" if severity in ["High", "Medium"] else "INFO")
 
 
     # --------------------------
@@ -95,21 +99,30 @@ class WebVulnerabilityScanner:
             current_url, current_depth = queue.popleft()
 
             # Normalize URL to avoid duplicates with different query string orders
-            normalized_url = current_url.split('?')[0] if '?' in current_url else current_url
+            # Simplified normalization for basic caching. For robust crawling, consider more sophisticated URL canonicalization.
+            base_url_no_query = current_url.split('?')[0].split('#')[0]
+            
+            # Check for visited URL. Use current_url in visited_urls to track full paths.
+            # However, for avoiding redundant work in low depth, also check normalized path.
             if current_url in self.visited_urls:
                 self.log(f"[CRAWL] Skipping already visited: {current_url}", "DEBUG")
                 continue
             
-            # Avoid re-visiting pages that only differ by query parameters if depth is low
-            if current_depth < self.max_depth and normalized_url in [u.split('?')[0] for u in self.visited_urls if '?' in u]:
-                 self.log(f"[CRAWL] Skipping already visited (normalized): {current_url}", "DEBUG")
-                 continue
+            # Additional check to avoid excessive crawling of similar URLs at low depths
+            # This is a heuristic and might skip some valid unique content
+            if current_depth < self.max_depth and base_url_no_query in [u.split('?')[0].split('#')[0] for u in self.visited_urls]:
+                # We only log this if it was a distinct URL being considered but decided to skip due to base path already visited
+                if current_url not in self.visited_urls: 
+                    self.log(f"[CRAWL] Skipping normalized (base path already visited): {current_url}", "DEBUG")
+                continue
 
+            # Add to visited before making request to prevent race conditions in queue
+            self.visited_urls.add(current_url) 
 
             try:
                 self.log(f"[CRAWL] Visiting {current_url} (Depth Remaining: {current_depth})")
                 response = self.session.get(current_url, timeout=15)
-                self.visited_urls.add(current_url) # Add the full URL visited
+                
 
                 # Check for directory listing
                 # Heuristic: Check common directory listing phrases AND 200 OK
@@ -124,7 +137,8 @@ class WebVulnerabilityScanner:
                     form_details = self.extract_form_details(form, current_url)
                     if form_details:
                         # Avoid duplicate forms if action/method/inputs are same
-                        if form_details not in self.forms:
+                        # A simple comparison of the dicts might suffice
+                        if form_details not in self.forms: # This will check if an identical dict exists
                             self.forms.append(form_details)
                             self.log(f"[CRAWL] Found form: Action='{form_details['action']}', Method='{form_details['method']}'", "INFO")
 
@@ -133,10 +147,18 @@ class WebVulnerabilityScanner:
                     for link in soup.find_all("a", href=True):
                         next_url = urljoin(current_url, link["href"])
                         # Basic check to stay within target domain
-                        if urlparse(self.target_url).netloc in urlparse(next_url).netloc:
-                            # Avoid crawling logout links or external links
-                            if not any(keyword in next_url.lower() for keyword in ["logout", "exit", "external"]):
-                                queue.append((next_url, current_depth - 1))
+                        parsed_next_url = urlparse(next_url)
+                        if urlparse(self.target_url).netloc == parsed_next_url.netloc: # Strict domain check
+                            # Avoid crawling logout links or external links (already covered, but reiterate importance)
+                            if not any(keyword in next_url.lower() for keyword in ["logout", "exit", "disconnect"]): # Added "disconnect"
+                                # Avoid fragment identifiers for crawling purposes unless specific need
+                                next_url_cleaned = parsed_next_url._replace(fragment="").geturl()
+                                if next_url_cleaned not in self.visited_urls:
+                                    queue.append((next_url_cleaned, current_depth - 1))
+                                else:
+                                    self.log(f"[CRAWL] Skipping already queued/visited (cleaned): {next_url_cleaned}", "DEBUG")
+                        else:
+                            self.log(f"[CRAWL] Skipping external link: {next_url}", "DEBUG")
 
             except requests.exceptions.Timeout:
                 self.log(f"[ERROR] Crawling {current_url} timed out after 15 seconds.", "WARNING")
@@ -217,9 +239,15 @@ class WebVulnerabilityScanner:
             "1 WAITFOR DELAY '0:0:5'--": "Time-based blind (MSSQL)"
         }
 
+        self.log(f"[SQLi] Testing '{input_name}' on {url} ({method.upper()})", "DEBUG")
+
         for payload, description in sql_payloads.items():
             test_data = data_or_params.copy()
-            test_data[input_name] = original_value + payload # Append payload
+            # Ensure we're modifying the value properly, especially for lists from parse_qs
+            if isinstance(original_value, list):
+                test_data[input_name] = original_value[0] + payload
+            else:
+                test_data[input_name] = original_value + payload
 
             response = None
             try:
@@ -227,6 +255,7 @@ class WebVulnerabilityScanner:
                 if method == "post":
                     response = self.session.post(url, data=test_data, timeout=15)
                 else: # GET method
+                    # urlencode is important for GET requests
                     response = self.session.get(url, params=test_data, timeout=15)
                 end_time = time.time()
 
@@ -246,24 +275,30 @@ class WebVulnerabilityScanner:
                     return True # Found vulnerability
 
                 # Boolean-based detection (if payload suggests it)
-                if "1=1" in payload or "1=2" in payload:
+                if ("1=1" in payload or "1=2" in payload) and response:
                     # Send a control request (without vulnerability) to compare
-                    control_data = data_or_params.copy()
-                    control_data[input_name] = original_value + " AND 1=1-- " if "AND" in payload else original_value # A known true condition
+                    control_data_true = data_or_params.copy()
+                    if isinstance(original_value, list):
+                        control_data_true[input_name] = original_value[0] + " AND 1=1-- "
+                    else:
+                        control_data_true[input_name] = original_value + " AND 1=1-- "
                     
-                    control_response = self.session.request(method, url, data=(control_data if method == "post" else None), params=(control_data if method == "get" else None), timeout=10)
-                    
-                    # Very basic check: if "1=1" changes page content significantly differently than "1=2"
-                    # This often needs more sophisticated content comparison (e.g., using difflib)
-                    if response and control_response:
-                        if "1=1" in payload and len(response.text) > 0 and len(response.text) == len(control_response.text) and response.text != control_response.text:
-                            # If page content is different for "always true" vs "always false" but lengths are similar, might indicate boolean blind
-                            # This is a weak heuristic, but a starting point without full content diffing
+                    control_data_false = data_or_params.copy()
+                    if isinstance(original_value, list):
+                        control_data_false[input_name] = original_value[0] + " AND 1=2-- "
+                    else:
+                        control_data_false[input_name] = original_value + " AND 1=2-- "
+
+                    response_true = self.session.request(method, url, data=(control_data_true if method == "post" else None), params=(control_data_true if method == "get" else None), timeout=10)
+                    response_false = self.session.request(method, url, data=(control_data_false if method == "post" else None), params=(control_data_false if method == "get" else None), timeout=10)
+
+                    # If responses for true and false conditions are significantly different
+                    # This is a strong indicator of boolean blind SQLi
+                    if response_true and response_false and response_true.text != response_false.text:
                             self.add_finding("SQL Injection (Boolean-based)", url, payload,
-                                                f"Input '{input_name}' produced a different response compared to a 'false' condition (length {len(response.text)} vs {len(control_response.text)}). Manual verification recommended.",
+                                                f"Input '{input_name}' shows boolean-based behavior. Response for 'true' differs from 'false' conditions.",
                                                 self.vulnerability_map[f"SQL Injection ({method.upper()})"])
                             return True
-
 
             except requests.exceptions.Timeout:
                 self.log(f"[WARNING] SQLi test for {url} ({input_name}) with payload '{payload}' timed out.", "WARNING")
@@ -279,14 +314,15 @@ class WebVulnerabilityScanner:
     # SQL Injection Test for GET parameters
     def test_sql_injection(self, url):
         parsed = urlparse(url)
-        params = parse_qs(parsed.query)
+        params = parse_qs(parsed.query) # parse_qs returns dict with list values
 
         if not params:
             return
 
-        self.log("[SQLi] Testing URL GET parameters for SQL Injection...", "INFO")
+        self.log(f"[SQLi] Testing URL GET parameters for SQL Injection on {url}...", "INFO")
         for key in params:
-            original_value = params[key][0]
+            # Pass the first value from the list, as it's typically what you modify
+            original_value = params[key][0] 
             # Call the core testing logic
             self._test_sql_injection_core(url, "get", params, key, original_value)
 
@@ -301,14 +337,21 @@ class WebVulnerabilityScanner:
             "\" onmouseover=\"alert('XSS')",
             "' onfocus='alert(\"XSS\")",
             "><script>alert(document.cookie)</script>",
-            # HTML encoded versions
+            # HTML encoded versions often found in reflections
             "&#x3C;script&#x3E;alert(&#x27;XSS&#x27;)&#x3C;/script&#x3E;",
-            "<img src=x onerror=alert&#x28;&#x27;XSS&#x27;&#x29;>"
+            "<img src=x onerror=alert&#x28;&#x27;XSS&#x27;&#x29;>",
+            # Double encoded versions sometimes bypass filters
+            "%253Cscript%253Ealert(%2527XSS%2527)%253C/script%253E"
         ]
+        
+        self.log(f"[XSS] Testing '{input_name}' on {url} ({method.upper()})", "DEBUG")
 
         for payload in xss_payloads:
             test_data = data_or_params.copy()
-            test_data[input_name] = original_value + payload # Append payload
+            if isinstance(original_value, list):
+                test_data[input_name] = original_value[0] + payload
+            else:
+                test_data[input_name] = original_value + payload
 
             try:
                 if method == "post":
@@ -317,12 +360,12 @@ class WebVulnerabilityScanner:
                     response = self.session.get(url, params=test_data, timeout=10)
                 
                 # Check for direct reflection or various encoded reflections
-                for detect_string in self.xss_detection_strings:
-                    if detect_string in response.text:
-                        self.add_finding("Cross-Site Scripting", url, payload,
-                                        f"Input '{input_name}' reflects XSS payload '{detect_string}' in response via {method.upper()} request.",
-                                        self.vulnerability_map[f"Cross-Site Scripting ({method.upper()})"])
-                        return True # Found vulnerability for this input
+                # Look for the payload itself or its "executed" form
+                if payload in response.text or any(detect_str in response.text for detect_str in self.xss_detection_strings):
+                    self.add_finding("Cross-Site Scripting", url, payload,
+                                    f"Input '{input_name}' reflects XSS payload or its execution string in response via {method.upper()} request.",
+                                    self.vulnerability_map[f"Cross-Site Scripting ({method.upper()})"])
+                    return True # Found vulnerability for this input
             except requests.exceptions.Timeout:
                 self.log(f"[WARNING] XSS test for {url} ({input_name}) with payload '{payload}' timed out.", "WARNING")
             except requests.exceptions.ConnectionError as ce:
@@ -342,7 +385,7 @@ class WebVulnerabilityScanner:
         if not params:
             return
 
-        self.log("[XSS] Testing URL GET parameters for XSS...", "INFO")
+        self.log(f"[XSS] Testing URL GET parameters for XSS on {url}...", "INFO")
         for key in params:
             original_value = params[key][0]
             # Call the core testing logic
@@ -366,19 +409,38 @@ class WebVulnerabilityScanner:
 
             # Test each input field in the form
             for input_field in form["inputs"]:
-                if input_field["type"] in ["text", "search", "url", "tel", "email", "password", "textarea"]: # Only test text-based inputs
+                # Only test text-based inputs that would take payloads
+                if input_field["type"] in ["text", "search", "url", "tel", "email", "password", "textarea"]: 
                     
-                    self.log(f"[FORM TEST] Testing form field '{input_field['name']}' in form at {action} ({method.upper()})", "DEBUG")
-                    
+                    # Initial data for the form submission
+                    # Use the actual 'value' attribute if present, otherwise default to "test_value"
                     initial_data = {inp["name"]: inp.get("value", "") or "test_value" for inp in form["inputs"]}
                     
                     # SQLi test for this input field
+                    # Note: We need to pass the *current state* of initial_data to the core functions
+                    # and the *original value* of the specific input being tested
                     if self._test_sql_injection_core(action, method, initial_data, input_field["name"], input_field.get("value", "")):
-                        pass # Already logged, continue to next input/form
+                        self.log(f"[FORM VULN] SQLi found in form field '{input_field['name']}' at {action}", "HIGH")
+                        # Add to form results here since it's a form-specific vuln
+                        self.results["forms"].append({
+                            "type": "SQL Injection (Form)",
+                            "url": action,
+                            "payload": "Refer to logs for specific payload",
+                            "evidence": f"Field '{input_field['name']}' is vulnerable to SQL Injection.",
+                            "severity": "High"
+                        })
 
                     # XSS test for this input field
                     if self._test_xss_core(action, method, initial_data, input_field["name"], input_field.get("value", "")):
-                        pass # Already logged
+                        self.log(f"[FORM VULN] XSS found in form field '{input_field['name']}' at {action}", "HIGH")
+                        # Add to form results here
+                        self.results["forms"].append({
+                            "type": "Cross-Site Scripting (Form)",
+                            "url": action,
+                            "payload": "Refer to logs for specific payload",
+                            "evidence": f"Field '{input_field['name']}' is vulnerable to XSS.",
+                            "severity": "High"
+                        })
 
 
     # --------------------------
@@ -389,17 +451,25 @@ class WebVulnerabilityScanner:
             "sitemap.xml", "crossdomain.xml", "server-status", ".htaccess", "web.config",
             "config.php", "config.inc", "admin/config.php", "inc/config.php",
             "logs/error.log", "logs/access.log", "debug.log",
-            "data.sql", "database.sql", "dump.sql"
+            "data.sql", "database.sql", "dump.sql",
+            # Common web server configs
+            "nginx.conf", "httpd.conf",
+            # Application specific files (examples)
+            "wp-config.php", # WordPress
+            "configuration.php", # Joomla
+            "local.xml" # Magento
         ]
         self.log("[FILES] Checking for sensitive files and directories...", "INFO")
         for path in sensitive_paths:
             full_url = urljoin(self.target_url, path)
             try:
-                response = self.session.get(full_url, timeout=5)
+                response = self.session.get(full_url, timeout=7) # Increased timeout slightly
                 # Check for 200 OK AND not a generic 404 page by looking at common 404 content
-                # This heuristic helps avoid false positives on sites that return 200 for 404s
-                if response.status_code == 200 and not any(f404_phrase in response.text.lower() for f404_phrase in ["not found", "page not found", "error 404", "does not exist"]):
+                # Also check for common "Forbidden" messages if status is 403
+                if response.status_code == 200 and not any(f404_phrase in response.text.lower() for f404_phrase in ["not found", "page not found", "error 404", "does not exist", "no such file or directory"]):
                     self.add_finding("Sensitive File Found", full_url, "N/A", f"File/directory '{path}' found (Status: {response.status_code}).", "High")
+                elif response.status_code == 403 and any(f403_phrase in response.text.lower() for f403_phrase in ["forbidden", "access denied"]):
+                    self.log(f"[INFO] Access to {full_url} was forbidden (Status: 403).", "INFO")
             except requests.exceptions.Timeout:
                 self.log(f"[WARNING] Check for sensitive file {full_url} timed out.", "INFO")
             except requests.exceptions.ConnectionError as ce:
@@ -412,59 +482,57 @@ class WebVulnerabilityScanner:
     # --------------------------
     # Basic IDOR check (conceptual, highly application specific)
     def test_idor_basic(self):
-        # This is a very basic, conceptual IDOR check.
-        # It's highly dependent on how the target application handles IDs.
         self.log("[IDOR] Performing basic IDOR checks (conceptual)...", "INFO")
         
-        # Collect all URLs visited that have numeric IDs in query parameters
         urls_with_numeric_ids = []
         for url in self.visited_urls:
             parsed = urlparse(url)
-            params = parse_qs(parsed.query)
+            params = parse_qs(parsed.query) # parse_qs returns dict with list values
             for key, values in params.items():
                 if 'id' in key.lower() and values and values[0].isdigit():
                     urls_with_numeric_ids.append((url, key, int(values[0])))
                     break # Only consider the first numeric ID parameter found
 
         for original_url, id_param_key, original_id_value in urls_with_numeric_ids:
-            # Try accessing adjacent IDs
-            for test_id in [original_id_value - 1, original_id_value + 1]:
-                if test_id > 0: # Ensure ID is positive
-                    parsed = urlparse(original_url)
-                    params = parse_qs(parsed.query)
-                    params[id_param_key] = [str(test_id)] # Modify the ID parameter
-                    test_url = parsed._replace(query=urlencode(params, doseq=True)).geturl()
-                    
-                    self.log(f"[IDOR] Attempting IDOR on {original_url} (changing {id_param_key} from {original_id_value} to {test_id})", "DEBUG")
+            # Try accessing adjacent IDs and potentially a common default ID like '1'
+            ids_to_test = set([original_id_value - 1, original_id_value + 1, 1])
+            if original_id_value == 1: # If original is 1, no need to test 1 again
+                ids_to_test.remove(1)
 
-                    try:
-                        response_original = self.session.get(original_url, timeout=10)
-                        response_test = self.session.get(test_url, timeout=10)
+            for test_id in [id_val for id_val in sorted(list(ids_to_test)) if id_val > 0]:
+                parsed = urlparse(original_url)
+                params = parse_qs(parsed.query)
+                params[id_param_key] = [str(test_id)] # Modify the ID parameter (ensure it's a list)
+                test_url = parsed._replace(query=urlencode(params, doseq=True)).geturl()
+                
+                self.log(f"[IDOR] Attempting IDOR on {original_url} (changing {id_param_key} from {original_id_value} to {test_id})", "DEBUG")
 
-                        # Very weak heuristic for IDOR:
-                        # If both original and test URLs return 200 OK, and
-                        # the content is different, AND the test content doesn't explicitly deny access (e.g., "access denied", "unauthorized").
-                        # A robust IDOR check would involve authentication and comparing content for data that should belong to another user.
-                        if response_original.status_code == 200 and response_test.status_code == 200:
-                            if response_original.text != response_test.text and \
-                               not any(deny_phrase in response_test.text.lower() for deny_phrase in ["access denied", "unauthorized", "permission denied", "not found"]):
-                                self.add_finding("Potential IDOR", test_url, f"Changed '{id_param_key}' from {original_id_value} to {test_id}", "Heuristic: Page loaded with different ID and didn't explicitly deny access. Manual verification needed.", "Medium")
-                            else:
-                                self.log(f"[IDOR] No IDOR detected for {test_url} (content same or access denied).", "DEBUG")
-                        elif response_test.status_code in [401, 403]:
-                            self.log(f"[IDOR] Access explicitly denied for {test_url} (Status: {response_test.status_code}).", "INFO")
+                try:
+                    response_original = self.session.get(original_url, timeout=10)
+                    response_test = self.session.get(test_url, timeout=10)
+
+                    # Check if status codes are 200 for both, and content is different,
+                    # AND the test content doesn't explicitly deny access.
+                    if response_original.status_code == 200 and response_test.status_code == 200:
+                        if response_original.text != response_test.text and \
+                           not any(deny_phrase in response_test.text.lower() for deny_phrase in ["access denied", "unauthorized", "permission denied", "not found", "invalid id"]):
+                            self.add_finding("Potential IDOR", test_url, f"Changed '{id_param_key}' from {original_id_value} to {test_id}", "Heuristic: Page loaded with different ID and didn't explicitly deny access/show error. Manual verification needed.", "Medium")
                         else:
-                            self.log(f"[IDOR] Non-200 status code for {test_url} (Status: {response_test.status_code}).", "DEBUG")
+                            self.log(f"[IDOR] No IDOR detected for {test_url} (content similar or access denied).", "DEBUG")
+                    elif response_test.status_code in [401, 403]:
+                        self.log(f"[IDOR] Access explicitly denied for {test_url} (Status: {response_test.status_code}).", "INFO")
+                    else:
+                        self.log(f"[IDOR] Non-200 status code for {test_url} (Status: {response_test.status_code}).", "DEBUG")
 
 
-                    except requests.exceptions.Timeout:
-                        self.log(f"[WARNING] IDOR test for {test_url} timed out.", "WARNING")
-                    except requests.exceptions.ConnectionError as ce:
-                        self.log(f"[ERROR] Could not connect to {test_url} during IDOR test: {ce}", "ERROR")
-                    except requests.exceptions.RequestException as re:
-                        self.log(f"[ERROR] Request failed for {test_url} during IDOR test: {re}", "ERROR")
-                    except Exception as e:
-                        self.log(f"[ERROR] Unexpected error during IDOR test for {test_url}: {e}", "ERROR")
+                except requests.exceptions.Timeout:
+                    self.log(f"[WARNING] IDOR test for {test_url} timed out.", "WARNING")
+                except requests.exceptions.ConnectionError as ce:
+                    self.log(f"[ERROR] Could not connect to {test_url} during IDOR test: {ce}", "ERROR")
+                except requests.exceptions.RequestException as re:
+                    self.log(f"[ERROR] Request failed for {test_url} during IDOR test: {re}", "ERROR")
+                except Exception as e:
+                    self.log(f"[ERROR] Unexpected error during IDOR test for {test_url}: {e}", "ERROR")
 
 
     # --------------------------
@@ -478,14 +546,14 @@ class WebVulnerabilityScanner:
         self.log(f"Starting crawling up to depth {self.max_depth}...", "INFO")
         self.crawl()
         
-        self.log("Testing GET parameters for SQL Injection on all visited URLs...", "INFO")
+        self.log("Testing SQL Injection on all visited URLs with GET parameters...", "INFO")
         for url in list(self.visited_urls): # Iterate over a copy to avoid issues if set changes
             parsed = urlparse(url)
             # Only test URLs with query parameters
             if parsed.query:
                 self.test_sql_injection(url)
         
-        self.log("Testing GET parameters for XSS on all visited URLs...", "INFO")
+        self.log("Testing XSS on all visited URLs with GET parameters...", "INFO")
         for url in list(self.visited_urls):
             parsed = urlparse(url)
             if parsed.query:
@@ -498,7 +566,7 @@ class WebVulnerabilityScanner:
         self.check_sensitive_files()
 
         self.log("Performing basic IDOR checks...", "INFO")
-        self.test_idor_basic() # Uncommented as the logic is now slightly improved (still heuristic)
+        self.test_idor_basic() 
 
         self.log("[DONE] Scan completed.", "INFO")
         return self.results
