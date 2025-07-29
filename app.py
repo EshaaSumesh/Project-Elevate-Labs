@@ -1,7 +1,7 @@
 import streamlit as st
 from scanner_core import WebVulnerabilityScanner
 import time
-import json # For saving structured report later, if desired
+import json
 
 st.set_page_config(
     page_title="CYBERNETIC SCANNER",
@@ -9,95 +9,97 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Custom CSS for dark mode & cyber-tech look ---
-# Enhanced CSS for more pronounced cyberpunk aesthetic
+# --- Updated Custom CSS for Blue/Cyan Cyber-Tech Look ---
 st.markdown("""
 <style>
     /* Overall Background and Text */
     .stApp {
-        background-color: #0A0A0A; /* Deep Space Black */
-        color: #00FFCC; /* Neon Green for general text */
-        font-family: 'Share Tech Mono', monospace; /* Techy Monospace Font */
+        background-color: #0F1C2D; /* Darker Blue-Black */
+        color: #00E5FF; /* Bright Cyan for general text */
+        font-family: 'Fira Code', monospace; /* Consistent Monospaced Font */
     }
 
-    /* Headers - Orbitron for Titles, Share Tech Mono for sub-headers */
+    /* Headers - Orbitron for Titles, Fira Code for sub-headers */
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Orbitron', sans-serif; /* Futuristic Header Font */
-        color: #00FFFF; /* Neon Blue for main titles */
-        text-shadow: 0 0 5px #00FFFF, 0 0 10px #00FFFF; /* Subtle neon glow */
+        color: #66FFFF; /* Lighter Cyan for main titles */
+        text-shadow: 0 0 8px #66FFFF, 0 0 15px #66FFFF; /* Stronger neon glow */
     }
     h1 {
-        color: #FF00FF; /* Neon Pink for the main app title */
+        color: #FF66FF; /* Neon Magenta for the main app title */
         text-align: center;
-        font-size: 3em;
-        padding-bottom: 0.5em;
+        font-size: 3.5em; /* Slightly larger */
+        padding-bottom: 0.7em;
     }
 
     /* Buttons */
     .stButton>button {
-        background-color: #238636; /* Dark Green */
-        color: #00FFCC; /* Neon Green Text */
+        background-color: #0077B6; /* Deep Blue */
+        color: #E0FFFF; /* Light Cyan Text */
         font-weight: bold;
-        border-radius: 6px;
-        border: 2px solid #00FFFF; /* Neon Blue border */
-        padding: 10px 20px;
-        box-shadow: 0 0 8px #00FFFF, 0 0 12px #00FFFF; /* Blue glow */
+        border-radius: 8px; /* Slightly more rounded */
+        border: 2px solid #00E5FF; /* Bright Cyan border */
+        padding: 12px 25px; /* Larger padding */
+        box-shadow: 0 0 10px #00E5FF, 0 0 20px #00E5FF; /* Blue glow */
         transition: all 0.3s ease;
     }
     .stButton>button:hover {
-        background-color: #2ea043; /* Lighter Green on hover */
-        color: #00FFFF; /* Text turns blue on hover */
-        box-shadow: 0 0 10px #FF00FF, 0 0 15px #FF00FF; /* Pink glow on hover */
-        border-color: #FF00FF;
+        background-color: #0096C7; /* Lighter Blue on hover */
+        color: #FFFFFF; /* White text on hover */
+        box-shadow: 0 0 15px #FF66FF, 0 0 25px #FF66FF; /* Magenta glow on hover */
+        border-color: #FF66FF;
+        transform: translateY(-2px); /* Slight lift effect */
     }
 
     /* Text Input */
     .stTextInput>div>div>input {
-        background-color: #161B22 !important; /* Dark Grey */
-        color: #00FFCC !important; /* Neon Green Text */
-        border: 2px solid #00FFFF !important; /* Neon Blue Border */
-        border-radius: 5px;
-        padding: 10px;
-        box-shadow: 0 0 5px #00FFFF;
+        background-color: #1A2E44 !important; /* Darker Blue-Grey */
+        color: #00E5FF !important; /* Bright Cyan Text */
+        border: 2px solid #00E5FF !important; /* Bright Cyan Border */
+        border-radius: 6px;
+        padding: 12px;
+        box-shadow: 0 0 6px #00E5FF;
+        font-family: 'Fira Code', monospace; /* Monospaced font */
     }
     .stTextInput>div>div>input:focus {
-        border-color: #FF00FF !important; /* Neon Pink on focus */
-        box-shadow: 0 0 8px #FF00FF !important;
+        border-color: #FF66FF !important; /* Neon Magenta on focus */
+        box-shadow: 0 0 10px #FF66FF !important;
     }
 
     /* Text Area */
     .stTextArea>div>div>textarea {
-        background-color: #161B22 !important;
-        color: #00FFCC !important;
-        border: 2px solid #00FFFF !important;
-        border-radius: 5px;
-        padding: 10px;
-        font-family: 'Share Tech Mono', monospace !important;
-        box-shadow: 0 0 5px #00FFFF;
+        background-color: #1A2E44 !important;
+        color: #00E5FF !important;
+        border: 2px solid #00E5FF !important;
+        border-radius: 6px;
+        padding: 12px;
+        font-family: 'Fira Code', monospace !important; /* Monospaced font */
+        box-shadow: 0 0 6px #00E5FF;
     }
 
     /* Progress Bar */
     .stProgress>div>div>div>div {
-        background-color: #00FFCC !important; /* Neon Green Progress */
+        background-color: #00E5FF !important; /* Bright Cyan Progress */
     }
     .stProgress>div>div {
-        background-color: #30363d !important; /* Darker track */
+        background-color: #304E6C !important; /* Darker track */
+        border-radius: 5px;
     }
 
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-        font-size: 1.2rem;
-        color: #00FFFF; /* Neon Blue for tab titles */
+        font-size: 1.3rem; /* Slightly larger */
+        color: #66FFFF; /* Lighter Cyan for tab titles */
         font-weight: bold;
         font-family: 'Orbitron', sans-serif;
     }
     .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
+        gap: 25px; /* More space between tabs */
         justify-content: center;
-        background-color: #161B22; /* Darker tab background */
-        border-radius: 8gpx;
-        padding: 10px;
-        box-shadow: 0 0 10px #00FFFF;
+        background-color: #1A2E44; /* Darker tab background */
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: 0 0 12px #00E5FF;
     }
     .stTabs [data-baseweb="tab-list"] button {
         background-color: transparent;
@@ -105,109 +107,121 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     .stTabs [data-baseweb="tab-list"] button:hover {
-        color: #FF00FF; /* Neon Pink on hover */
-        text-shadow: 0 0 5px #FF00FF;
+        color: #FF66FF; /* Neon Magenta on hover */
+        text-shadow: 0 0 8px #FF66FF;
     }
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        border-bottom: 3px solid #FF00FF; /* Neon Pink active tab indicator */
-        color: #FF00FF;
-        text-shadow: 0 0 5px #FF00FF;
+        border-bottom: 4px solid #FF66FF; /* Neon Magenta active tab indicator */
+        color: #FF66FF;
+        text-shadow: 0 0 8px #FF66FF;
     }
 
     /* Expander (for detailed findings) */
     .stExpander {
-        background-color: #161B22; /* Darker background for expander */
-        border: 1px solid #00FFFF; /* Neon Blue border */
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 10px;
-        box-shadow: 0 0 5px #00FFFF;
+        background-color: #1A2E44; /* Darker background for expander */
+        border: 2px solid #00E5FF; /* Bright Cyan border */
+        border-radius: 10px;
+        padding: 15px; /* More padding */
+        margin-bottom: 15px;
+        box-shadow: 0 0 8px #00E5FF;
     }
     .stExpander > div > div > p {
-        color: #00FFCC; /* Neon Green text inside expander */
-        font-family: 'Share Tech Mono', monospace;
+        color: #00E5FF; /* Bright Cyan text inside expander */
+        font-family: 'Fira Code', monospace;
     }
     /* Expander header */
     .stExpander > div:first-child > div:first-child {
-        color: #00FFFF;
+        color: #66FFFF; /* Lighter Cyan for expander headers */
         font-weight: bold;
         font-family: 'Orbitron', sans-serif;
     }
 
     /* Streamlit Messages (info, warning, error, success) */
     .stAlert {
-        border-radius: 8px;
-        padding: 15px;
-        margin-bottom: 10px;
-        font-family: 'Share Tech Mono', monospace;
+        border-radius: 10px;
+        padding: 20px; /* More padding */
+        margin-bottom: 15px;
+        font-family: 'Fira Code', monospace;
         font-weight: bold;
+        box-shadow: 0 0 10px rgba(0,229,255,0.3); /* Subtle blue glow for alerts */
     }
     .stAlert.st-success {
-        background-color: #1a3a2a; /* Darker green background */
-        color: #00FFCC; /* Neon Green */
-        border: 1px solid #00FFCC;
+        background-color: #0F3D3D; /* Darker teal background */
+        color: #00E5FF; /* Bright Cyan */
+        border: 1px solid #00E5FF;
     }
     .stAlert.st-warning {
-        background-color: #4a3a1a; /* Darker orange background */
+        background-color: #4D4A1A; /* Darker yellow-orange background */
         color: #FFD700; /* Gold */
         border: 1px solid #FFD700;
     }
     .stAlert.st-error {
-        background-color: #5a1a1a; /* Darker red background */
-        color: #FF6347; /* Tomato */
-        border: 1px solid #FF6347;
+        background-color: #5C1A1A; /* Darker red background */
+        color: #FF6666; /* Soft Red */
+        border: 1px solid #FF6666;
     }
     .stAlert.st-info {
-        background-color: #1a2a4a; /* Darker blue background */
-        color: #00FFFF; /* Neon Blue */
-        border: 1px solid #00FFFF;
+        background-color: #1A2A4D; /* Darker blue background */
+        color: #66FFFF; /* Lighter Cyan */
+        border: 1px solid #66FFFF;
     }
 
     /* Code Blocks (for evidence) */
     code {
-        background-color: #30363d; /* Darker background for code */
-        color: #00FFCC; /* Neon Green code text */
-        border-radius: 4px;
-        padding: 2px 4px;
-        font-family: 'Fira Code', monospace; /* Monospace font for code */
-        font-size: 0.9em;
+        background-color: #304E6C; /* Darker blue-grey for code */
+        color: #00E5FF; /* Bright Cyan code text */
+        border-radius: 5px;
+        padding: 3px 6px;
+        font-family: 'Fira Code', monospace;
+        font-size: 0.95em;
     }
     pre {
-        background-color: #161B22; /* Darker background for preformatted text */
-        color: #00FFCC;
-        border: 1px solid #00FFFF;
-        border-radius: 5px;
-        padding: 10px;
+        background-color: #1A2E44; /* Darker background for preformatted text */
+        color: #00E5FF;
+        border: 1px solid #00E5FF;
+        border-radius: 8px;
+        padding: 15px;
         overflow-x: auto;
     }
 
     /* Sidebar Customization */
     [data-testid="stSidebar"] {
-        background-color: #161B22;
-        color: #00FFCC;
-        border-right: 2px solid #00FFFF;
-        box-shadow: 2px 0 10px #00FFFF;
+        background-color: #1A2E44;
+        color: #00E5FF;
+        border-right: 3px solid #00E5FF;
+        box-shadow: 3px 0 15px #00E5FF;
     }
     [data-testid="stSidebar"] h2 {
-        color: #FF00FF;
+        color: #FF66FF;
         font-family: 'Orbitron', sans-serif;
         text-align: center;
-        padding-bottom: 1em;
+        padding-bottom: 1.5em;
+        text-shadow: 0 0 10px #FF66FF;
     }
-
+    /* Streamlit internal text, e.g., for sliders */
+    div.st-emotion-cache-1jmvejs p {
+        font-family: 'Fira Code', monospace;
+        color: #00E5FF;
+    }
+    div.st-emotion-cache-nahz7x p { /* Another p tag class for text */
+        font-family: 'Fira Code', monospace;
+        color: #00E5FF;
+    }
+    
     /* Divider */
     hr {
-        border-top: 1px dashed #00FFFF; /* Neon blue dashed line */
+        border-top: 2px dashed #66FFFF; /* Lighter Cyan dashed line */
+        margin-top: 1.5em;
+        margin-bottom: 1.5em;
     }
 
 </style>
 """, unsafe_allow_html=True)
 
 
-# Google Fonts for the cyberpunk aesthetic
+# Google Fonts for the cyberpunk aesthetic (ensuring Fira Code is loaded for monospaced)
 st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Fira+Code&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Fira+Code:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 """, unsafe_allow_html=True)
 
 
@@ -231,15 +245,12 @@ max_depth = st.slider(
 )
 
 # Placeholders for dynamic content
-# log_placeholder is defined HERE once, outside the button click
-log_area_container = st.empty() # This will hold the text_area
-
 progress_bar = st.progress(0)
 status_text = st.empty()
 
 # Function to display findings
 def display_findings(findings, title):
-    st.subheader(f"🌐 {title} ({len(findings)})")
+    st.subheader(f"{title} ({len(findings)})")
     if findings:
         for i, finding in enumerate(findings):
             severity = finding.get("severity", "Info")
@@ -272,73 +283,58 @@ if st.button("INITIATE SCAN"):
         scanner = WebVulnerabilityScanner(target_url, depth=max_depth)
 
         # Use st.session_state to hold logs and update dynamically
-        if 'scan_logs' not in st.session_state:
-            st.session_state.scan_logs = []
+        st.session_state.scan_logs = [] # Clear logs for new scan at the start
 
-        # Define the update function
-        def update_log_and_progress(pct, msg, log_msg=None, log_level="INFO"):
+        # Function to update progress bar, status text, and collect logs
+        def update_progress_and_status(pct, msg, log_msg=None, log_level="INFO"):
             progress_bar.progress(pct)
             status_text.text(f"Status: {msg}")
             if log_msg:
                 st.session_state.scan_logs.append(f"[{log_level}] {log_msg}")
-                # Update the content of the pre-existing text_area using its container
-                with log_area_container: # Use the placeholder defined globally
-                    st.text_area("Scan Logs", value="\n".join(st.session_state.scan_logs), height=350, max_chars=None, key="scan_logs_display_unique")
-                # The key is now unique here, but more importantly, the text_area itself is only drawn once.
-                # When using a placeholder to update, Streamlit doesn't recreate the element, it just updates its content.
             time.sleep(0.05) # Small delay for UI update visibility
 
-        st.session_state.scan_logs = [] # Clear logs for new scan at the start of a scan
-        # The log_area_container is already defined, no need to re-initialize it here.
-        # Ensure the text_area is drawn once initially
-        with log_area_container:
-            st.text_area("Scan Logs", value="", height=350, max_chars=None, key="scan_logs_display_initial")
-
-
-        update_log_and_progress(0, "Preparing scanner...", log_msg="Scan initiated.", log_level="INFO")
+        update_progress_and_status(0, "Preparing scanner...", log_msg="Scan initiated.", log_level="INFO")
 
         # --- Scan Execution Steps ---
-        update_log_and_progress(5, "Checking security headers...",
+        update_progress_and_status(5, "Checking security headers...",
                                 log_msg="Starting security header analysis.")
         scanner.check_security_headers()
-        # The add_finding method in scanner_core now handles logging
-        # The logs are collected in scanner.results["logs"]
 
-
-        update_log_and_progress(25, "Crawling website...",
+        update_progress_and_status(25, "Crawling website...",
                                 log_msg=f"Starting website crawling up to depth {max_depth}.")
         scanner.crawl()
 
 
-        update_log_and_progress(50, "Testing for SQL Injection (GET)...",
+        update_progress_and_status(50, "Testing for SQL Injection (GET)...",
                                 log_msg="Initiating GET parameter SQL Injection tests.")
         # Ensure we test all visited URLs for GET-based SQLi/XSS
         for url_to_test in scanner.visited_urls:
              scanner.test_sql_injection(url_to_test)
 
 
-        update_log_and_progress(70, "Testing for Cross-Site Scripting (GET)...",
+        update_progress_and_status(70, "Testing for Cross-Site Scripting (GET)...",
                                 log_msg="Initiating GET parameter XSS tests.")
         for url_to_test in scanner.visited_urls:
             scanner.test_xss(url_to_test)
 
 
-        update_log_and_progress(80, "Testing forms for vulnerabilities...",
+        update_progress_and_status(80, "Testing forms for vulnerabilities...",
                                 log_msg="Analyzing forms for SQLi, XSS, and CSRF.")
         scanner.test_forms()
 
-        update_log_and_progress(90, "Checking for sensitive files and directory listings...",
+        update_progress_and_status(90, "Checking for sensitive files and directory listings...",
                                 log_msg="Scanning for common sensitive files and directory exposure.")
         scanner.check_sensitive_files()
 
-        # update_log_and_progress(95, "Performing basic IDOR checks...",
+        # update_progress_and_status(95, "Performing basic IDOR checks...",
         #                         log_msg="Conducting basic Insecure Direct Object Reference checks.")
         # scanner.test_idor_basic() # Uncomment if IDOR is matured for basic heuristic checks
 
         final_results = scanner.results
-        final_logs = st.session_state.scan_logs + final_results["logs"] # Combine internal logs with scanner logs
+        # Combine the logs collected by update_progress_and_status with logs from scanner_core
+        final_logs = st.session_state.scan_logs + final_results["logs"]
 
-        update_log_and_progress(100, "Scan complete! Generating report...",
+        update_progress_and_status(100, "Scan complete! Generating report...",
                                 log_msg="Scan finished. Results ready.", log_level="INFO")
         status_text.empty() # Clear final status message
 
@@ -382,10 +378,8 @@ if st.button("INITIATE SCAN"):
             display_findings(final_results["sensitive_files"], "Sensitive Files & Directory Listings")
 
         with tab7:
-            # Display combined logs
-            st.subheader("📡 Full Scan Logs")
-            # This text_area is outside the loop, so it will only be drawn once.
-            # Its content will be the full combined logs after the scan is complete.
+            # Display combined logs in a dedicated text_area at the end
+            st.subheader(" Full Scan Logs")
             st.text_area("All Scan Activity", value="\n".join(final_logs), height=500, max_chars=None, key="final_scan_logs_display")
 
         # --- Download Report Button ---
