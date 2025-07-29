@@ -2,6 +2,11 @@ import streamlit as st
 from scanner_core import WebVulnerabilityScanner
 import time
 
+st.set_page_config(
+    page_title="Cyber Web Vulnerability Scanner",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 # --- Custom CSS for dark mode & cyber-tech look ---
 dark_css = """
 <style>
